@@ -467,9 +467,11 @@ Use `Enter Data` in Power BI Desktop to paste these rows directly.
 
 After successfully loading the `Nodes` and `Edges` tables into your Power BI semantic model, you need to create **two DAX measures** that convert your table columns into JSON strings so the visual can consume them efficiently.
 
+The visual supports **two DAX approaches** — both are parsed automatically:
+
 ### Step 1 — Create the `NodesJSON` Measure
 
-Create a New Measure in your model and paste the following DAX:
+#### Option A — `CONCATENATEX` (classic, works with all Power BI versions)
 
 ```dax
 NodesJSON =
@@ -500,9 +502,37 @@ VAR _rows =
 RETURN "[" & _rows & "]"
 ```
 
+#### Option B — `TOJSON` (recommended for large models, Power BI May 2024+)
+
+> ⚠️ **Always specify `maxCapacity`** (second argument). Without it, `TOJSON` silently truncates at a tiny default row limit — only a few rows are returned regardless of your table size.
+
+```dax
+NodesJSON TOJSON =
+TOJSON(
+    SELECTCOLUMNS(
+        Nodes,
+        "NodeId",       Nodes[NodeId],
+        "NodeName",     Nodes[NodeName],
+        "NodeType",     Nodes[NodeType],
+        "Workspace",    Nodes[Workspace],
+        "RefreshTime",
+            IF(
+                ISBLANK(Nodes[RefreshTime]),
+                BLANK(),
+                FORMAT(Nodes[RefreshTime], "yyyy-MM-ddTHH:mm:ss") & "Z"
+            ),
+        "RefreshStatus",
+            IF(ISBLANK(Nodes[RefreshStatus]), BLANK(), Nodes[RefreshStatus]),
+        "PbiUrl",
+            IF(ISBLANK(Nodes[PbiUrl]), BLANK(), Nodes[PbiUrl])
+    ),
+    100000   -- maxCapacity: allow up to 100,000 rows
+)
+```
+
 ### Step 2 — Create the `EdgesJSON` Measure
 
-Create another measure for your edges:
+#### Option A — `CONCATENATEX`
 
 ```dax
 EdgesJSON =
@@ -517,6 +547,24 @@ VAR _rows =
     )
 RETURN "[" & _rows & "]"
 ```
+
+#### Option B — `TOJSON`
+
+```dax
+EdgesJSON TOJSON =
+TOJSON(
+    SELECTCOLUMNS(
+        Edges,
+        "SourceId", Edges[SourceId],
+        "Source",   Edges[Source],
+        "TargetId", Edges[TargetId],
+        "Target",   Edges[Target]
+    ),
+    100000   -- maxCapacity: allow up to 100,000 rows
+)
+```
+
+> The visual **auto-detects** the format and parses both correctly. You can freely switch without changing any visual settings.
 
 ### Step 3 — Field Well Mapping in the Visual
 

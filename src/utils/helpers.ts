@@ -60,3 +60,24 @@ export function initWorkspaceColors(workspaces: string[]): Record<string, string
     });
     return wc;
 }
+
+export function parseDaxJson(rawData: string): any[] {
+    const parsed = JSON.parse(rawData);
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+    if (parsed && Array.isArray(parsed.header) && Array.isArray(parsed.data)) {
+        // Strip out brackets and quotes from headers (DAX TOJSON wraps names in [ColumnName])
+        const headers = parsed.header.map((h: string) => h.replace(/[\[\]"]/g, ''));
+        return parsed.data.map((rowArray: any[]) => {
+            let obj: any = {};
+            headers.forEach((headerName: string, index: number) => {
+                // Convert null (from DAX BLANK()) to empty string to prevent runtime crashes
+                const val = rowArray[index];
+                obj[headerName] = val === null || val === undefined ? '' : val;
+            });
+            return obj;
+        });
+    }
+    return [];
+}

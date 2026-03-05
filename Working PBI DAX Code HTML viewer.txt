@@ -56,8 +56,26 @@ VAR __WS_COLORS =
 VAR __BASE_SCRIPT =
 "
 <script>
-const NODES = " & __NODES_JSON & ";
-const EDGES = " & __EDGES_JSON & ";
+// -----------------------------------------------------------
+// DAX JSON FORMAT ADAPTER
+// Handles both CONCATENATEX (array of objects) and TOJSON
+// (tabular format with header + data arrays) automatically.
+// -----------------------------------------------------------
+function parseDaxJson(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.header) && Array.isArray(raw.data)) {
+    var headers = raw.header.map(function(h){ return h.replace(/[\[\]"]/g,''); });
+    return raw.data.map(function(row){
+      var obj = {};
+      headers.forEach(function(k,i){ obj[k] = (row[i] === null || row[i] === undefined) ? '' : row[i]; });
+      return obj;
+    });
+  }
+  return [];
+}
+
+const NODES = parseDaxJson(" & __NODES_JSON & ");
+const EDGES = parseDaxJson(" & __EDGES_JSON & ");
 const WP = " & __WS_COLORS & ";
 const WC = {};
 const UP = {};

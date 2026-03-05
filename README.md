@@ -68,6 +68,10 @@ You need two tables in your model:
 
 ### Step 2 — Create the NodesJSON measure
 
+The visual supports **two DAX approaches** — both work identically:
+
+#### Option A — `CONCATENATEX` (classic, compatible with all Power BI versions)
+
 ```dax
 NodesJSON =
 VAR _rows =
@@ -97,7 +101,37 @@ VAR _rows =
 RETURN "[" & _rows & "]"
 ```
 
+#### Option B — `TOJSON` (recommended for large models, requires Power BI May 2024+)
+
+> ⚠️ **Always specify `maxCapacity`** (the second argument). Without it, `TOJSON` silently truncates at a tiny default row limit and only a fraction of your data returns.
+
+```dax
+NodesJSON TOJSON =
+TOJSON(
+    SELECTCOLUMNS(
+        Nodes,
+        "NodeId",       Nodes[NodeId],
+        "NodeName",     Nodes[NodeName],
+        "NodeType",     Nodes[NodeType],
+        "Workspace",    Nodes[Workspace],
+        "RefreshTime",
+            IF(
+                ISBLANK(Nodes[Last Successful Refresh node]),
+                BLANK(),
+                FORMAT(Nodes[Last Successful Refresh node], "yyyy-MM-ddTHH:mm:ss") & "Z"
+            ),
+        "RefreshStatus",
+            IF(ISBLANK(Nodes[Latest Refresh Status]), BLANK(), Nodes[Latest Refresh Status]),
+        "PbiUrl",
+            IF(ISBLANK(Nodes[PBI_URL]), BLANK(), Nodes[PBI_URL])
+    ),
+    100000   -- maxCapacity: allow up to 100,000 rows
+)
+```
+
 ### Step 3 — Create the EdgesJSON measure
+
+#### Option A — `CONCATENATEX`
 
 ```dax
 EdgesJSON =
@@ -114,6 +148,24 @@ VAR _rows =
     )
 RETURN "[" & _rows & "]"
 ```
+
+#### Option B — `TOJSON`
+
+```dax
+EdgesJSON TOJSON =
+TOJSON(
+    SELECTCOLUMNS(
+        Edges,
+        "SourceId", Edges[SourceId],
+        "Source",   Edges[Source],
+        "TargetId", Edges[TargetId],
+        "Target",   Edges[Target]
+    ),
+    100000   -- maxCapacity: allow up to 100,000 rows
+)
+```
+
+> The visual **auto-detects** the format and parses both correctly — no code changes needed when switching.
 
 ### Step 4 — Add the visual to your report
 

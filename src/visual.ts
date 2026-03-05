@@ -11,7 +11,7 @@ import IVisualHost = powerbi.extensibility.visual.IVisualHost;
 
 import { VisualFormattingSettingsModel } from "./settings";
 import { NodeData, EdgeData } from "./interfaces";
-import { initWorkspaceColors } from "./utils/helpers";
+import { initWorkspaceColors, parseDaxJson } from "./utils/helpers";
 import { anc, dsc, precompute, getVisibleNodes } from "./utils/graphUtils";
 import { LayoutEngine } from "./renderer/LayoutEngine";
 import { CardBuilder } from "./renderer/CardBuilder";
@@ -102,14 +102,14 @@ export class Visual implements IVisual {
     const edgesStr = iEdges >= 0 ? String(row[iEdges] || "") : "";
 
     try {
-      this.nodes = nodesStr.trim() ? JSON.parse(nodesStr) : [];
+      this.nodes = nodesStr.trim() ? parseDaxJson(nodesStr) : [];
     } catch (e) {
       this.showEmpty("Nodes JSON parse error: " + e);
       return;
     }
 
     try {
-      this.edges = edgesStr.trim() ? JSON.parse(edgesStr) : [];
+      this.edges = edgesStr.trim() ? parseDaxJson(edgesStr) : [];
     } catch (e) {
       this.showEmpty("Edges JSON parse error: " + e);
       return;

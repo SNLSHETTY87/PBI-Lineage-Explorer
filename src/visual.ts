@@ -79,6 +79,13 @@ export class Visual implements IVisual {
     this.initSubRenderers();
     this.bindEvents();
     this.setupResizeHandling();
+
+    // Restore saved theme
+    try {
+      if (localStorage.getItem('pbi-lineage-theme') === 'light') {
+        this.container.classList.add('light');
+      }
+    } catch (_) { /* localStorage unavailable in some PBI environments */ }
   }
 
   public update(options: VisualUpdateOptions): void {
@@ -239,6 +246,7 @@ export class Visual implements IVisual {
   <button id="failed-btn">
     <span class="fb-dot"></span>Failed Only
   </button>
+  <button id="theme-btn" title="Toggle light / dark mode">&#9790;</button>
   <span class="sep"></span>
   <div id="wsl"></div>
   <span id="ct"></span>
@@ -409,6 +417,18 @@ export class Visual implements IVisual {
         this.render();
         requestAnimationFrame(() => this.redraw());
       });
+    }
+
+    // Theme (light / dark) toggle
+    const themeBtn = this.container.querySelector('#theme-btn') as HTMLElement;
+    if (themeBtn) {
+      themeBtn.addEventListener('click', () => {
+        const isLight = this.container.classList.toggle('light');
+        themeBtn.innerHTML = isLight ? '&#9728;' : '&#9790;'; // ☀ or ☾
+        try { localStorage.setItem('pbi-lineage-theme', isLight ? 'light' : 'dark'); } catch (_) { /* ignore */ }
+      });
+      // Sync icon with restored theme
+      if (this.container.classList.contains('light')) themeBtn.innerHTML = '&#9728;';
     }
 
     // Clear failed on total click

@@ -96,12 +96,48 @@ let colState = {};
 VAR __STYLES =
 "
 <style>
+/* --- DARK MODE defaults (CSS tokens) --- */
+:root {
+  --bg:#07090f;--surface:#0c1120;--surface2:#111827;
+  --border:#1c2540;--border2:#2a3550;
+  --text:#dde5f4;--muted:#9aaac2;--dim:#4a5878;
+  --sum-bg:#080d1a;--rp-bg:#09101e;--vbact:#161e30;
+  --scrl:#313d63;--sgap:#131a2e;--tt-bg:#0c1729;
+  --shadow:rgba(0,0,0,.8);--shadow-c:rgba(0,0,0,.6);
+  --wli:#b9c6e6;--is2:#d6e1ff;--sbt:#94a3c4;
+  --shcnt:#c8d4ff;--rpe:#cfd9f4;--msob:#0d1729;
+  --hov:rgba(255,255,255,.04);
+  --blue:#4d9eff;--green:#34d399;--orange:#fb923c;
+  --purple:#a78bfa;--pink:#f472b6;--yellow:#fbbf24;
+}
+/* --- LIGHT MODE overrides --- */
+body.light {
+  --bg:#f0f2f8;--surface:#ffffff;--surface2:#e8ecf4;
+  --border:#c8d0e4;--border2:#aab4cc;
+  --text:#1a2240;--muted:#5a6888;--dim:#8898b8;
+  --sum-bg:#e4e8f4;--rp-bg:#f8faff;--vbact:#d8dff0;
+  --scrl:#c0c8dc;--sgap:#d0d8ec;--tt-bg:#ffffff;
+  --shadow:rgba(100,120,160,.15);--shadow-c:rgba(100,120,160,.12);
+  --wli:#3a4a70;--is2:#2a3a60;--sbt:#6070a0;
+  --shcnt:#3a4a70;--rpe:#3a4a70;--msob:#dce3f3;
+  --hov:rgba(0,0,0,.04);
+}
+/* --- THEME BUTTON --- */
+#theme-btn{
+  display:flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:5px;
+  background:var(--surface2);border:1px solid var(--border);
+  color:var(--muted);font-size:13px;cursor:pointer;
+  transition:all .15s;flex-shrink:0;padding:0;
+}
+#theme-btn:hover{border-color:var(--border2);color:var(--text);background:var(--vbact);}
+
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;width:100%;overflow:hidden;}
 body{
-  background:#07090f;
+  background:var(--bg);
   font-family:'Segoe UI',sans-serif;
-  color:#dde5f4;
+  color:var(--text);
   display:flex;
   flex-direction:column;
 }
@@ -110,13 +146,13 @@ body{
 #app-wrap{
   position:fixed;top:0;left:0;right:0;bottom:0;
   display:flex;flex-direction:column;
-  background:#07090f;overflow:hidden;
+  background:var(--bg);overflow:hidden;
 }
 
 /* TOP BAR */
 #tb{
   display:flex;align-items:center;gap:8px;
-  padding:6px 14px;background:#0c1120;border-bottom:1px solid #1c2540;
+  padding:6px 14px;background:var(--surface);border-bottom:1px solid var(--border);
   flex-wrap:wrap;flex-shrink:0;position:relative;z-index:100;
 }
 #tb h1{
@@ -533,6 +569,8 @@ VAR __HTML_BODY =
     <span class='fb-dot'></span>Failed Only
   </button>
 
+  <button id='theme-btn' title='Toggle light / dark mode' onclick='toggleTheme()'>&#9790;</button>
+
   <!-- Export Button -->
   <button id='export-btn' onclick='exportPNG()'>↓ PNG</button>
 
@@ -681,6 +719,25 @@ VAR __HTML_BODY =
 VAR __SCRIPT_CORE_1 =
 "
 <script>
+
+// -----------------------------------------------------------
+// THEME TOGGLE (light / dark)
+// -----------------------------------------------------------
+function toggleTheme() {
+  var isLight = document.body.classList.toggle('light');
+  var btn = document.getElementById('theme-btn');
+  if (btn) btn.innerHTML = isLight ? '&#9728;' : '&#9790;';
+  try { localStorage.setItem('pbi-lineage-theme', isLight ? 'light' : 'dark'); } catch(e){}
+}
+(function() {
+  try {
+    if (localStorage.getItem('pbi-lineage-theme') === 'light') {
+      document.body.classList.add('light');
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.innerHTML = '&#9728;';
+    }
+  } catch(e) {}
+})();
 
 // -----------------------------------------------------------
 // WORKSPACE COLOR INITIALIZATION

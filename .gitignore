@@ -3,3 +3,4 @@ node_modules/
 dist/
 *.pbiviz
 webpack.statistics.prod.html
+nul

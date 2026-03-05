@@ -17,7 +17,6 @@ A Power BI custom visual that renders an interactive, topological lineage graph 
 - **Stage collapse** — collapse any pipeline stage column
 - **Normal / Compact** view toggle
 - **Failed Only** filter
-- **Export PNG** — saves the current canvas as an image
 - **Workspace color legend**
 
 ---

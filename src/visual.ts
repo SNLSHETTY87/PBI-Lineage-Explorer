@@ -22,141 +22,141 @@ import { TooltipManager } from "./renderer/TooltipManager";
 import { ImpactBar } from "./renderer/ImpactBar";
 
 export class Visual implements IVisual {
-    private host: IVisualHost;
-    private container: HTMLElement;
-    private formattingSettingsService: FormattingSettingsService;
-    private formattingSettings: VisualFormattingSettingsModel;
+  private host: IVisualHost;
+  private container: HTMLElement;
+  private formattingSettingsService: FormattingSettingsService;
+  private formattingSettings: VisualFormattingSettingsModel;
 
-    // Data
-    private nodes: NodeData[] = [];
-    private edges: EdgeData[] = [];
+  // Data
+  private nodes: NodeData[] = [];
+  private edges: EdgeData[] = [];
 
-    // Filter state
-    private selWS: Set<string> = new Set();
-    private selDF: Set<string> = new Set();
-    private selRP: Set<string> = new Set();
-    private searchTerm: string = '';
-    private failedOnly: boolean = false;
-    private selectedCard: string | null = null;
-    private collapseState: Record<number, boolean> = {};
+  // Filter state
+  private selWS: Set<string> = new Set();
+  private selDF: Set<string> = new Set();
+  private selRP: Set<string> = new Set();
+  private searchTerm: string = '';
+  private failedOnly: boolean = false;
+  private selectedCard: string | null = null;
+  private collapseState: Record<number, boolean> = {};
 
-    // Precomputed
-    private UP: Record<string, number> = {};
-    private DN: Record<string, number> = {};
-    private RI: Record<string, Set<string>> = {};
-    private WC: Record<string, string> = {};
+  // Precomputed
+  private UP: Record<string, number> = {};
+  private DN: Record<string, number> = {};
+  private RI: Record<string, Set<string>> = {};
+  private WC: Record<string, string> = {};
 
-    // Sub-renderers
-    private layoutEngine: LayoutEngine;
-    private cardBuilder: CardBuilder;
-    private edgeDrawer: EdgeDrawer;
-    private toolbar: Toolbar;
-    private rightPanel: RightPanel;
-    private tooltipManager: TooltipManager;
-    private impactBar: ImpactBar;
+  // Sub-renderers
+  private layoutEngine: LayoutEngine;
+  private cardBuilder: CardBuilder;
+  private edgeDrawer: EdgeDrawer;
+  private toolbar: Toolbar;
+  private rightPanel: RightPanel;
+  private tooltipManager: TooltipManager;
+  private impactBar: ImpactBar;
 
-    // DOM refs
-    private gridEl: HTMLElement;
-    private svgLayer: SVGGElement;
-    private mainEl: HTMLElement;
-    private stageHeadersEl: HTMLElement;
+  // DOM refs
+  private gridEl: HTMLElement;
+  private svgLayer: SVGGElement;
+  private mainEl: HTMLElement;
+  private stageHeadersEl: HTMLElement;
 
-    // Resize tracking
-    private lastW: number = 0;
-    private lastH: number = 0;
-    private rzTimer: ReturnType<typeof setTimeout> | null = null;
+  // Resize tracking
+  private lastW: number = 0;
+  private lastH: number = 0;
+  private rzTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Data change tracking
-    private prevDataKey: string = '';
+  // Data change tracking
+  private prevDataKey: string = '';
 
-    constructor(options: VisualConstructorOptions) {
-        this.host = options.host;
-        this.container = options.element;
-        this.formattingSettingsService = new FormattingSettingsService();
+  constructor(options: VisualConstructorOptions) {
+    this.host = options.host;
+    this.container = options.element;
+    this.formattingSettingsService = new FormattingSettingsService();
 
-        this.container.classList.add('lineage-visual');
-        this.buildStaticDOM();
-        this.initSubRenderers();
-        this.bindEvents();
-        this.setupResizeHandling();
+    this.container.classList.add('lineage-visual');
+    this.buildStaticDOM();
+    this.initSubRenderers();
+    this.bindEvents();
+    this.setupResizeHandling();
+  }
+
+  public update(options: VisualUpdateOptions): void {
+    this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
+      VisualFormattingSettingsModel, options.dataViews?.[0]
+    );
+
+    const dataView = options.dataViews?.[0];
+    if (!dataView?.table?.rows?.length) {
+      this.showEmpty("Drag <b>Nodes JSON</b> and <b>Edges JSON</b> measures into the field wells");
+      return;
     }
 
-    public update(options: VisualUpdateOptions): void {
-        this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
-            VisualFormattingSettingsModel, options.dataViews?.[0]
-        );
+    const columns = dataView.table.columns;
+    const row = dataView.table.rows[0];
 
-        const dataView = options.dataViews?.[0];
-        if (!dataView?.table?.rows?.length) {
-            this.showEmpty("Drag <b>Nodes JSON</b> and <b>Edges JSON</b> measures into the field wells");
-            return;
-        }
+    const iNodes = columns.findIndex(c => c.roles?.['nodesJson']);
+    const iEdges = columns.findIndex(c => c.roles?.['edgesJson']);
 
-        const columns = dataView.table.columns;
-        const row = dataView.table.rows[0];
+    const nodesStr = iNodes >= 0 ? String(row[iNodes] || "") : "";
+    const edgesStr = iEdges >= 0 ? String(row[iEdges] || "") : "";
 
-        const iNodes = columns.findIndex(c => c.roles?.['nodesJson']);
-        const iEdges = columns.findIndex(c => c.roles?.['edgesJson']);
-
-        const nodesStr = iNodes >= 0 ? String(row[iNodes] || "") : "";
-        const edgesStr = iEdges >= 0 ? String(row[iEdges] || "") : "";
-
-        try {
-            this.nodes = nodesStr.trim() ? JSON.parse(nodesStr) : [];
-        } catch (e) {
-            this.showEmpty("Nodes JSON parse error: " + e);
-            return;
-        }
-
-        try {
-            this.edges = edgesStr.trim() ? JSON.parse(edgesStr) : [];
-        } catch (e) {
-            this.showEmpty("Edges JSON parse error: " + e);
-            return;
-        }
-
-        if (!this.nodes.length) {
-            this.showEmpty("No nodes data received");
-            return;
-        }
-
-        this.hideEmpty();
-
-        // Detect data change
-        const dataKey = this.nodes.map(n => n.NodeId).sort().join(',') +
-            '|' + this.edges.map(e => e.SourceId + '>' + e.TargetId).sort().join(',');
-        const dataChanged = dataKey !== this.prevDataKey;
-        this.prevDataKey = dataKey;
-
-        // Recompute
-        this.WC = initWorkspaceColors(this.nodes.map(n => n.Workspace));
-        const pc = precompute(this.nodes, this.edges);
-        this.UP = pc.UP;
-        this.DN = pc.DN;
-        this.RI = pc.RI;
-
-        if (dataChanged) {
-            const nodeIds = new Set(this.nodes.map(n => n.NodeId));
-            const wsSet = new Set(this.nodes.map(n => n.Workspace));
-            this.selWS = new Set([...this.selWS].filter(w => wsSet.has(w)));
-            this.selDF = new Set([...this.selDF].filter(id => nodeIds.has(id)));
-            this.selRP = new Set([...this.selRP].filter(id => nodeIds.has(id)));
-            if (this.selectedCard && !nodeIds.has(this.selectedCard)) {
-                this.selectedCard = null;
-            }
-            this.toolbar.buildDropdowns(this.nodes, this.WC, this.selWS, this.selDF, this.selRP);
-        }
-
-        this.updateSummaryBar();
-        this.render();
+    try {
+      this.nodes = nodesStr.trim() ? JSON.parse(nodesStr) : [];
+    } catch (e) {
+      this.showEmpty("Nodes JSON parse error: " + e);
+      return;
     }
 
-    public getFormattingModel(): powerbi.visuals.FormattingModel {
-        return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
+    try {
+      this.edges = edgesStr.trim() ? JSON.parse(edgesStr) : [];
+    } catch (e) {
+      this.showEmpty("Edges JSON parse error: " + e);
+      return;
     }
 
-    private buildStaticDOM(): void {
-        this.container.innerHTML = `
+    if (!this.nodes.length) {
+      this.showEmpty("No nodes data received");
+      return;
+    }
+
+    this.hideEmpty();
+
+    // Detect data change
+    const dataKey = this.nodes.map(n => n.NodeId).sort().join(',') +
+      '|' + this.edges.map(e => e.SourceId + '>' + e.TargetId).sort().join(',');
+    const dataChanged = dataKey !== this.prevDataKey;
+    this.prevDataKey = dataKey;
+
+    // Recompute
+    this.WC = initWorkspaceColors(this.nodes.map(n => n.Workspace));
+    const pc = precompute(this.nodes, this.edges);
+    this.UP = pc.UP;
+    this.DN = pc.DN;
+    this.RI = pc.RI;
+
+    if (dataChanged) {
+      const nodeIds = new Set(this.nodes.map(n => n.NodeId));
+      const wsSet = new Set(this.nodes.map(n => n.Workspace));
+      this.selWS = new Set([...this.selWS].filter(w => wsSet.has(w)));
+      this.selDF = new Set([...this.selDF].filter(id => nodeIds.has(id)));
+      this.selRP = new Set([...this.selRP].filter(id => nodeIds.has(id)));
+      if (this.selectedCard && !nodeIds.has(this.selectedCard)) {
+        this.selectedCard = null;
+      }
+      this.toolbar.buildDropdowns(this.nodes, this.WC, this.selWS, this.selDF, this.selRP);
+    }
+
+    this.updateSummaryBar();
+    this.render();
+  }
+
+  public getFormattingModel(): powerbi.visuals.FormattingModel {
+    return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
+  }
+
+  private buildStaticDOM(): void {
+    this.container.innerHTML = `
 <div id="app-wrap">
 <div class="nc-tooltip" id="tt">
   <div class="tt-name" id="tt-nm"></div>
@@ -239,7 +239,6 @@ export class Visual implements IVisual {
   <button id="failed-btn">
     <span class="fb-dot"></span>Failed Only
   </button>
-  <button id="export-btn">&#8595; PNG</button>
   <span class="sep"></span>
   <div id="wsl"></div>
   <span id="ct"></span>
@@ -353,368 +352,339 @@ export class Visual implements IVisual {
 <div class="empty-state" id="empty-msg" style="display:none">
   <div>Drag <b>Nodes JSON</b> and <b>Edges JSON</b> measures into the field wells</div>
 </div>`;
-    }
+  }
 
-    private initSubRenderers(): void {
-        this.gridEl = this.container.querySelector('#grid') as HTMLElement;
-        this.mainEl = this.container.querySelector('#main') as HTMLElement;
-        this.stageHeadersEl = this.container.querySelector('#stage-headers') as HTMLElement;
-        this.svgLayer = this.container.querySelector('#el') as unknown as SVGGElement;
+  private initSubRenderers(): void {
+    this.gridEl = this.container.querySelector('#grid') as HTMLElement;
+    this.mainEl = this.container.querySelector('#main') as HTMLElement;
+    this.stageHeadersEl = this.container.querySelector('#stage-headers') as HTMLElement;
+    this.svgLayer = this.container.querySelector('#el') as unknown as SVGGElement;
 
-        const ttEl = this.container.querySelector('#tt') as HTMLElement;
-        const rpanelEl = this.container.querySelector('#rpanel') as HTMLElement;
+    const ttEl = this.container.querySelector('#tt') as HTMLElement;
+    const rpanelEl = this.container.querySelector('#rpanel') as HTMLElement;
 
-        this.layoutEngine = new LayoutEngine();
-        this.cardBuilder = new CardBuilder();
-        this.edgeDrawer = new EdgeDrawer(this.svgLayer, this.mainEl);
-        this.toolbar = new Toolbar(this.container, () => this.onFilterChange());
-        this.rightPanel = new RightPanel(rpanelEl);
-        this.tooltipManager = new TooltipManager(ttEl);
-        this.impactBar = new ImpactBar(this.container);
+    this.layoutEngine = new LayoutEngine();
+    this.cardBuilder = new CardBuilder();
+    this.edgeDrawer = new EdgeDrawer(this.svgLayer, this.mainEl);
+    this.toolbar = new Toolbar(this.container, () => this.onFilterChange());
+    this.rightPanel = new RightPanel(rpanelEl);
+    this.tooltipManager = new TooltipManager(ttEl);
+    this.impactBar = new ImpactBar(this.container);
 
-        this.toolbar.bindDropdownToggles();
-        this.rightPanel.bindSectionToggles();
-    }
+    this.toolbar.bindDropdownToggles();
+    this.rightPanel.bindSectionToggles();
+  }
 
-    private bindEvents(): void {
-        const sb = this.container.querySelector('#sb') as HTMLInputElement;
-        const failedBtn = this.container.querySelector('#failed-btn') as HTMLElement;
+  private bindEvents(): void {
+    const sb = this.container.querySelector('#sb') as HTMLInputElement;
+    const failedBtn = this.container.querySelector('#failed-btn') as HTMLElement;
 
-        // Search
-        if (sb) {
-            sb.addEventListener('input', () => {
-                this.searchTerm = sb.value.toLowerCase().trim();
-                this.clearSelection();
-                this.render();
-            });
-        }
-
-        // Normal/Compact toggle
-        this.container.querySelectorAll('.vb').forEach(b => {
-            b.addEventListener('click', () => {
-                this.container.querySelectorAll('.vb').forEach(x => x.classList.remove('act'));
-                b.classList.add('act');
-                this.container.classList.toggle('cmp', (b as HTMLElement).dataset.v === 'c');
-                requestAnimationFrame(() => this.redraw());
-            });
-        });
-
-        // Failed-only toggle
-        if (failedBtn) {
-            failedBtn.addEventListener('click', () => {
-                this.failedOnly = !this.failedOnly;
-                failedBtn.classList.toggle('active', this.failedOnly);
-                const stat = this.container.querySelector('#sbn-fail-stat');
-                if (stat) stat.classList.toggle('active', this.failedOnly);
-                if (this.failedOnly) this.clearSelection();
-                this.render();
-                requestAnimationFrame(() => this.redraw());
-            });
-        }
-
-        // Clear failed on total click
-        const totalStat = this.container.querySelector('#sbn-total-stat') as HTMLElement;
-        if (totalStat) {
-            totalStat.addEventListener('click', () => {
-                this.failedOnly = false;
-                if (failedBtn) failedBtn.classList.remove('active');
-                const stat = this.container.querySelector('#sbn-fail-stat');
-                if (stat) stat.classList.remove('active');
-                this.render();
-                requestAnimationFrame(() => this.redraw());
-            });
-        }
-
-        // Click outside node
-        if (this.mainEl) {
-            this.mainEl.addEventListener('click', (e: Event) => {
-                if (!(e.target as HTMLElement).closest('.nc')) {
-                    this.clearSelection();
-                    this.drawCurrentEdges(null);
-                }
-            });
-            this.mainEl.addEventListener('scroll', () => this.redraw());
-        }
-
-        // Panel toggle
-        const rpTab = this.container.querySelector('#rp-tab') as HTMLElement;
-        if (rpTab) rpTab.addEventListener('click', () => this.togglePanel());
-
-        // Export PNG
-        const exportBtn = this.container.querySelector('#export-btn') as HTMLElement;
-        if (exportBtn) exportBtn.addEventListener('click', () => this.exportPNG());
-
-        // Keyboard
-        this.container.setAttribute('tabindex', '0');
-        this.container.addEventListener('keydown', (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                this.clearSelection();
-                this.failedOnly = false;
-                if (failedBtn) failedBtn.classList.remove('active');
-                if (sb) { sb.value = ''; this.searchTerm = ''; }
-                this.render();
-            }
-            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-                e.preventDefault();
-                if (sb) { sb.focus(); sb.select(); }
-            }
-        });
-
-        window.addEventListener('resize', () => {
-            this.fixTabPosition();
-            this.redraw();
-        });
-    }
-
-    private render(): void {
-        const visNodes = getVisibleNodes(
-            this.nodes, this.edges,
-            this.selWS, this.selDF, this.selRP,
-            this.searchTerm, this.failedOnly
-        );
-
-        const nIds = new Set(visNodes.map(n => n.NodeId));
-        const visEdges = this.edges.filter(e => nIds.has(e.SourceId) && nIds.has(e.TargetId));
-        const columns = this.layoutEngine.computeLayout(visNodes, visEdges);
-
-        const svgEl = this.container.querySelector('#esvg') as SVGElement;
-        this.gridEl.innerHTML = '';
-        if (svgEl) this.gridEl.appendChild(svgEl);
-
-        this.stageHeadersEl.innerHTML = '';
-
-        columns.forEach((col) => {
-            const sh = document.createElement('div');
-            sh.className = 'sh' + (this.collapseState[col.index] ? ' collapsed' : '');
-            sh.style.flex = '0 0 260px';
-
-            const colBtn = document.createElement('button');
-            colBtn.className = 'sh-collapse';
-            colBtn.title = 'Collapse stage';
-            colBtn.textContent = this.collapseState[col.index] ? '\u25B6' : '\u25C0';
-            colBtn.addEventListener('click', () => {
-                this.collapseState[col.index] = !this.collapseState[col.index];
-                this.render();
-                requestAnimationFrame(() => this.redraw());
-            });
-
-            sh.innerHTML =
-                '<div class="sh-dot" style="background:' + col.info.dotColor + '"></div>' +
-                col.info.label +
-                '<span class="sh-cnt">' + col.nodes.length + '</span>';
-            sh.appendChild(colBtn);
-            this.stageHeadersEl.appendChild(sh);
-
-            const shg = document.createElement('div');
-            shg.className = 'sh-gap';
-            this.stageHeadersEl.appendChild(shg);
-
-            const colDiv = document.createElement('div');
-            colDiv.className = 'stage' + (this.collapseState[col.index] ? ' collapsed' : '');
-
-            const cLbl = document.createElement('div');
-            cLbl.className = 'collapsed-label';
-            cLbl.textContent = col.info.label;
-            colDiv.appendChild(cLbl);
-
-            col.nodes.forEach(n => {
-                colDiv.appendChild(this.cardBuilder.makeCard(
-                    n, this.WC, this.UP, this.DN, this.RI,
-                    (id) => this.onCardClick(id),
-                    (node, el) => this.tooltipManager.show(node, el, this.UP, this.DN),
-                    () => this.tooltipManager.hide()
-                ));
-            });
-
-            this.gridEl.appendChild(colDiv);
-            const gap = document.createElement('div');
-            gap.className = 'stage-gap' + (this.collapseState[col.index] ? ' collapsed' : '');
-            this.gridEl.appendChild(gap);
-        });
-
-        const ct = this.container.querySelector('#ct') as HTMLElement;
-        if (ct) ct.textContent = visNodes.length + ' nodes \u00b7 ' + visEdges.length + ' edges';
-
-        const emp = this.container.querySelector('#emp') as HTMLElement;
-        if (emp) emp.style.display = visNodes.length === 0 ? 'block' : 'none';
-
-        requestAnimationFrame(() => this.drawCurrentEdges(null));
-
-        if (this.selectedCard && nIds.has(this.selectedCard)) {
-            this.onCardClick(this.selectedCard);
-        } else {
-            this.rightPanel.hideContent();
-        }
-
-        this.fixTabPosition();
-    }
-
-    private onCardClick(id: string): void {
-        if (this.selectedCard === id) {
-            this.clearSelection();
-            this.drawCurrentEdges(null);
-            return;
-        }
-
-        this.selectedCard = id;
-        const ae = this.getVisibleEdges();
-        const a = anc(id, ae);
-        const d = dsc(id, ae);
-        const ls = new Set([id, ...a, ...d]);
-
-        this.container.querySelectorAll('.nc').forEach(c => {
-            const el = c as HTMLElement;
-            const cid = el.dataset.id || '';
-            el.classList.remove('sel', 'hl', 'dm');
-            if (cid === id) el.classList.add('sel');
-            else if (ls.has(cid)) el.classList.add('hl');
-            else el.classList.add('dm');
-        });
-
-        this.edgeDrawer.drawEdges(ae, ls);
-        this.impactBar.show(id, this.nodes, d);
-        this.rightPanel.show(id, this.nodes, this.edges, a, d, this.WC, (clickId) => this.onCardClick(clickId));
-    }
-
-    private clearSelection(): void {
-        this.selectedCard = null;
-        this.container.querySelectorAll('.nc').forEach(c => c.classList.remove('sel', 'hl', 'dm'));
-        this.impactBar.hide();
-        this.rightPanel.hideContent();
-    }
-
-    private getVisibleEdges(): EdgeData[] {
-        const ids = new Set<string>();
-        this.container.querySelectorAll('.nc').forEach(c => {
-            const id = (c as HTMLElement).dataset.id;
-            if (id) ids.add(id);
-        });
-        return this.edges.filter(e => ids.has(e.SourceId) && ids.has(e.TargetId));
-    }
-
-    private drawCurrentEdges(hlSet: Set<string> | null): void {
-        const ae = this.getVisibleEdges();
-        if (this.selectedCard && !hlSet) {
-            const a = anc(this.selectedCard, ae);
-            const d = dsc(this.selectedCard, ae);
-            this.edgeDrawer.drawEdges(ae, new Set([this.selectedCard, ...a, ...d]));
-        } else {
-            this.edgeDrawer.drawEdges(ae, hlSet);
-        }
-    }
-
-    private redraw(): void {
-        const ae = this.getVisibleEdges();
-        if (this.selectedCard) {
-            const a = anc(this.selectedCard, ae);
-            const d = dsc(this.selectedCard, ae);
-            this.edgeDrawer.drawEdges(ae, new Set([this.selectedCard, ...a, ...d]));
-        } else {
-            this.edgeDrawer.drawEdges(ae, null);
-        }
-    }
-
-    private onFilterChange(): void {
-        const sel = this.toolbar.getFilterSelections();
-        this.selWS = sel.ws;
-        this.selDF = sel.df;
-        this.selRP = sel.rp;
+    // Search
+    if (sb) {
+      sb.addEventListener('input', () => {
+        this.searchTerm = sb.value.toLowerCase().trim();
         this.clearSelection();
         this.render();
+      });
     }
 
-    private updateSummaryBar(): void {
-        this.setTextById('sbn-total', String(this.nodes.length));
-        this.setTextById('sbn-ok', String(this.nodes.filter(n => n.RefreshStatus === 'success').length));
-        this.setTextById('sbn-fail', String(this.nodes.filter(n => n.RefreshStatus === 'failed').length));
-        this.setTextById('sbn-prog', String(this.nodes.filter(n => n.RefreshStatus === 'progress').length));
-    }
-
-    private togglePanel(): void {
-        const panel = this.container.querySelector('#rpanel') as HTMLElement;
-        const tab = this.container.querySelector('#rp-tab') as HTMLElement;
-        if (!panel || !tab) return;
-        panel.classList.toggle('hidden');
-        tab.textContent = panel.classList.contains('hidden') ? '\u25B6' : '\u25C0';
-        tab.style.right = panel.classList.contains('hidden') ? '0' : '270px';
+    // Normal/Compact toggle
+    this.container.querySelectorAll('.vb').forEach(b => {
+      b.addEventListener('click', () => {
+        this.container.querySelectorAll('.vb').forEach(x => x.classList.remove('act'));
+        b.classList.add('act');
+        this.container.classList.toggle('cmp', (b as HTMLElement).dataset.v === 'c');
         requestAnimationFrame(() => this.redraw());
+      });
+    });
+
+    // Failed-only toggle
+    if (failedBtn) {
+      failedBtn.addEventListener('click', () => {
+        this.failedOnly = !this.failedOnly;
+        failedBtn.classList.toggle('active', this.failedOnly);
+        const stat = this.container.querySelector('#sbn-fail-stat');
+        if (stat) stat.classList.toggle('active', this.failedOnly);
+        if (this.failedOnly) this.clearSelection();
+        this.render();
+        requestAnimationFrame(() => this.redraw());
+      });
     }
 
-    private fixTabPosition(): void {
-        const p = this.container.querySelector('#rpanel') as HTMLElement;
-        const t = this.container.querySelector('#rp-tab') as HTMLElement;
-        if (!p || !t) return;
-        t.style.display = 'flex';
-        t.style.right = p.classList.contains('hidden') ? '0' : '270px';
+    // Clear failed on total click
+    const totalStat = this.container.querySelector('#sbn-total-stat') as HTMLElement;
+    if (totalStat) {
+      totalStat.addEventListener('click', () => {
+        this.failedOnly = false;
+        if (failedBtn) failedBtn.classList.remove('active');
+        const stat = this.container.querySelector('#sbn-fail-stat');
+        if (stat) stat.classList.remove('active');
+        this.render();
+        requestAnimationFrame(() => this.redraw());
+      });
     }
 
-    private exportPNG(): void {
-        const btn = this.container.querySelector('#export-btn') as HTMLElement;
-        if (btn) { btn.textContent = '\u27F3 Exporting\u2026'; btn.style.opacity = '0.6'; }
-
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        script.onload = () => {
-            (window as any).html2canvas(this.mainEl, {
-                backgroundColor: '#07090f', scale: 2, useCORS: true, logging: false
-            }).then((canvas: HTMLCanvasElement) => {
-                const a = document.createElement('a');
-                a.download = 'pbi_lineage_' + new Date().toISOString().slice(0, 10) + '.png';
-                a.href = canvas.toDataURL('image/png');
-                a.click();
-                if (btn) { btn.textContent = '\u2193 PNG'; btn.style.opacity = ''; }
-            }).catch(() => {
-                if (btn) { btn.textContent = '\u2193 PNG'; btn.style.opacity = ''; }
-            });
-        };
-        script.onerror = () => {
-            if (btn) { btn.textContent = '\u2193 PNG'; btn.style.opacity = ''; }
-        };
-        document.head.appendChild(script);
-    }
-
-    private showEmpty(msg: string): void {
-        const appWrap = this.container.querySelector('#app-wrap') as HTMLElement;
-        const emptyMsg = this.container.querySelector('#empty-msg') as HTMLElement;
-        if (appWrap) appWrap.style.display = 'none';
-        if (emptyMsg) { emptyMsg.style.display = 'flex'; emptyMsg.innerHTML = '<div>' + msg + '</div>'; }
-    }
-
-    private hideEmpty(): void {
-        const appWrap = this.container.querySelector('#app-wrap') as HTMLElement;
-        const emptyMsg = this.container.querySelector('#empty-msg') as HTMLElement;
-        if (appWrap) appWrap.style.display = 'flex';
-        if (emptyMsg) emptyMsg.style.display = 'none';
-    }
-
-    private setupResizeHandling(): void {
-        if (typeof ResizeObserver !== 'undefined') {
-            new ResizeObserver(() => this.onResize()).observe(this.container);
+    // Click outside node
+    if (this.mainEl) {
+      this.mainEl.addEventListener('click', (e: Event) => {
+        if (!(e.target as HTMLElement).closest('.nc')) {
+          this.clearSelection();
+          this.drawCurrentEdges(null);
         }
-        setInterval(() => {
-            const w = this.container.clientWidth;
-            const h = this.container.clientHeight;
-            if (w !== this.lastW || h !== this.lastH) {
-                this.lastW = w;
-                this.lastH = h;
-                this.onResize();
-            }
-        }, 150);
+      });
+      this.mainEl.addEventListener('scroll', () => this.redraw());
     }
 
-    private onResize(): void {
-        if (this.rzTimer) clearTimeout(this.rzTimer);
-        this.rzTimer = setTimeout(() => {
-            if (this.nodes.length) {
-                this.render();
-                this.redraw();
-            }
-            this.fixTabPosition();
-        }, 80);
+    // Panel toggle
+    const rpTab = this.container.querySelector('#rp-tab') as HTMLElement;
+    if (rpTab) rpTab.addEventListener('click', () => this.togglePanel());
+
+    // Keyboard
+    this.container.setAttribute('tabindex', '0');
+    this.container.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        this.clearSelection();
+        this.failedOnly = false;
+        if (failedBtn) failedBtn.classList.remove('active');
+        if (sb) { sb.value = ''; this.searchTerm = ''; }
+        this.render();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        if (sb) { sb.focus(); sb.select(); }
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      this.fixTabPosition();
+      this.redraw();
+    });
+  }
+
+  private render(): void {
+    const visNodes = getVisibleNodes(
+      this.nodes, this.edges,
+      this.selWS, this.selDF, this.selRP,
+      this.searchTerm, this.failedOnly
+    );
+
+    const nIds = new Set(visNodes.map(n => n.NodeId));
+    const visEdges = this.edges.filter(e => nIds.has(e.SourceId) && nIds.has(e.TargetId));
+    const columns = this.layoutEngine.computeLayout(visNodes, visEdges);
+
+    const svgEl = this.container.querySelector('#esvg') as SVGElement;
+    this.gridEl.innerHTML = '';
+    if (svgEl) this.gridEl.appendChild(svgEl);
+
+    this.stageHeadersEl.innerHTML = '';
+
+    columns.forEach((col) => {
+      const sh = document.createElement('div');
+      sh.className = 'sh' + (this.collapseState[col.index] ? ' collapsed' : '');
+      sh.style.flex = '0 0 260px';
+
+      const colBtn = document.createElement('button');
+      colBtn.className = 'sh-collapse';
+      colBtn.title = 'Collapse stage';
+      colBtn.textContent = this.collapseState[col.index] ? '\u25B6' : '\u25C0';
+      colBtn.addEventListener('click', () => {
+        this.collapseState[col.index] = !this.collapseState[col.index];
+        this.render();
+        requestAnimationFrame(() => this.redraw());
+      });
+
+      sh.innerHTML =
+        '<div class="sh-dot" style="background:' + col.info.dotColor + '"></div>' +
+        col.info.label +
+        '<span class="sh-cnt">' + col.nodes.length + '</span>';
+      sh.appendChild(colBtn);
+      this.stageHeadersEl.appendChild(sh);
+
+      const shg = document.createElement('div');
+      shg.className = 'sh-gap';
+      this.stageHeadersEl.appendChild(shg);
+
+      const colDiv = document.createElement('div');
+      colDiv.className = 'stage' + (this.collapseState[col.index] ? ' collapsed' : '');
+
+      const cLbl = document.createElement('div');
+      cLbl.className = 'collapsed-label';
+      cLbl.textContent = col.info.label;
+      colDiv.appendChild(cLbl);
+
+      col.nodes.forEach(n => {
+        colDiv.appendChild(this.cardBuilder.makeCard(
+          n, this.WC, this.UP, this.DN, this.RI,
+          (id) => this.onCardClick(id),
+          (node, el) => this.tooltipManager.show(node, el, this.UP, this.DN),
+          () => this.tooltipManager.hide()
+        ));
+      });
+
+      this.gridEl.appendChild(colDiv);
+      const gap = document.createElement('div');
+      gap.className = 'stage-gap' + (this.collapseState[col.index] ? ' collapsed' : '');
+      this.gridEl.appendChild(gap);
+    });
+
+    const ct = this.container.querySelector('#ct') as HTMLElement;
+    if (ct) ct.textContent = visNodes.length + ' nodes \u00b7 ' + visEdges.length + ' edges';
+
+    const emp = this.container.querySelector('#emp') as HTMLElement;
+    if (emp) emp.style.display = visNodes.length === 0 ? 'block' : 'none';
+
+    requestAnimationFrame(() => this.drawCurrentEdges(null));
+
+    if (this.selectedCard && nIds.has(this.selectedCard)) {
+      this.onCardClick(this.selectedCard);
+    } else {
+      this.rightPanel.hideContent();
     }
 
-    private setTextById(id: string, text: string): void {
-        const el = this.container.querySelector('#' + id) as HTMLElement;
-        if (el) el.textContent = text;
+    this.fixTabPosition();
+  }
+
+  private onCardClick(id: string): void {
+    if (this.selectedCard === id) {
+      this.clearSelection();
+      this.drawCurrentEdges(null);
+      return;
     }
+
+    this.selectedCard = id;
+    const ae = this.getVisibleEdges();
+    const a = anc(id, ae);
+    const d = dsc(id, ae);
+    const ls = new Set([id, ...a, ...d]);
+
+    this.container.querySelectorAll('.nc').forEach(c => {
+      const el = c as HTMLElement;
+      const cid = el.dataset.id || '';
+      el.classList.remove('sel', 'hl', 'dm');
+      if (cid === id) el.classList.add('sel');
+      else if (ls.has(cid)) el.classList.add('hl');
+      else el.classList.add('dm');
+    });
+
+    this.edgeDrawer.drawEdges(ae, ls);
+    this.impactBar.show(id, this.nodes, d);
+    this.rightPanel.show(id, this.nodes, this.edges, a, d, this.WC, (clickId) => this.onCardClick(clickId));
+  }
+
+  private clearSelection(): void {
+    this.selectedCard = null;
+    this.container.querySelectorAll('.nc').forEach(c => c.classList.remove('sel', 'hl', 'dm'));
+    this.impactBar.hide();
+    this.rightPanel.hideContent();
+  }
+
+  private getVisibleEdges(): EdgeData[] {
+    const ids = new Set<string>();
+    this.container.querySelectorAll('.nc').forEach(c => {
+      const id = (c as HTMLElement).dataset.id;
+      if (id) ids.add(id);
+    });
+    return this.edges.filter(e => ids.has(e.SourceId) && ids.has(e.TargetId));
+  }
+
+  private drawCurrentEdges(hlSet: Set<string> | null): void {
+    const ae = this.getVisibleEdges();
+    if (this.selectedCard && !hlSet) {
+      const a = anc(this.selectedCard, ae);
+      const d = dsc(this.selectedCard, ae);
+      this.edgeDrawer.drawEdges(ae, new Set([this.selectedCard, ...a, ...d]));
+    } else {
+      this.edgeDrawer.drawEdges(ae, hlSet);
+    }
+  }
+
+  private redraw(): void {
+    const ae = this.getVisibleEdges();
+    if (this.selectedCard) {
+      const a = anc(this.selectedCard, ae);
+      const d = dsc(this.selectedCard, ae);
+      this.edgeDrawer.drawEdges(ae, new Set([this.selectedCard, ...a, ...d]));
+    } else {
+      this.edgeDrawer.drawEdges(ae, null);
+    }
+  }
+
+  private onFilterChange(): void {
+    const sel = this.toolbar.getFilterSelections();
+    this.selWS = sel.ws;
+    this.selDF = sel.df;
+    this.selRP = sel.rp;
+    this.clearSelection();
+    this.render();
+  }
+
+  private updateSummaryBar(): void {
+    this.setTextById('sbn-total', String(this.nodes.length));
+    this.setTextById('sbn-ok', String(this.nodes.filter(n => n.RefreshStatus === 'success').length));
+    this.setTextById('sbn-fail', String(this.nodes.filter(n => n.RefreshStatus === 'failed').length));
+    this.setTextById('sbn-prog', String(this.nodes.filter(n => n.RefreshStatus === 'progress').length));
+  }
+
+  private togglePanel(): void {
+    const panel = this.container.querySelector('#rpanel') as HTMLElement;
+    const tab = this.container.querySelector('#rp-tab') as HTMLElement;
+    if (!panel || !tab) return;
+    panel.classList.toggle('hidden');
+    tab.textContent = panel.classList.contains('hidden') ? '\u25B6' : '\u25C0';
+    tab.style.right = panel.classList.contains('hidden') ? '0' : '270px';
+    requestAnimationFrame(() => this.redraw());
+  }
+
+  private fixTabPosition(): void {
+    const p = this.container.querySelector('#rpanel') as HTMLElement;
+    const t = this.container.querySelector('#rp-tab') as HTMLElement;
+    if (!p || !t) return;
+    t.style.display = 'flex';
+    t.style.right = p.classList.contains('hidden') ? '0' : '270px';
+  }
+
+  private showEmpty(msg: string): void {
+    const appWrap = this.container.querySelector('#app-wrap') as HTMLElement;
+    const emptyMsg = this.container.querySelector('#empty-msg') as HTMLElement;
+    if (appWrap) appWrap.style.display = 'none';
+    if (emptyMsg) { emptyMsg.style.display = 'flex'; emptyMsg.innerHTML = '<div>' + msg + '</div>'; }
+  }
+
+  private hideEmpty(): void {
+    const appWrap = this.container.querySelector('#app-wrap') as HTMLElement;
+    const emptyMsg = this.container.querySelector('#empty-msg') as HTMLElement;
+    if (appWrap) appWrap.style.display = 'flex';
+    if (emptyMsg) emptyMsg.style.display = 'none';
+  }
+
+  private setupResizeHandling(): void {
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => this.onResize()).observe(this.container);
+    }
+    setInterval(() => {
+      const w = this.container.clientWidth;
+      const h = this.container.clientHeight;
+      if (w !== this.lastW || h !== this.lastH) {
+        this.lastW = w;
+        this.lastH = h;
+        this.onResize();
+      }
+    }, 150);
+  }
+
+  private onResize(): void {
+    if (this.rzTimer) clearTimeout(this.rzTimer);
+    this.rzTimer = setTimeout(() => {
+      if (this.nodes.length) {
+        this.render();
+        this.redraw();
+      }
+      this.fixTabPosition();
+    }, 80);
+  }
+
+  private setTextById(id: string, text: string): void {
+    const el = this.container.querySelector('#' + id) as HTMLElement;
+    if (el) el.textContent = text;
+  }
 }

@@ -1,0 +1,32 @@
+{
+  "dataRoles": [
+    {
+      "displayName": "Nodes JSON",
+      "name": "nodesJson",
+      "kind": "Measure",
+      "description": "DAX measure returning the Nodes JSON array string"
+    },
+    {
+      "displayName": "Edges JSON",
+      "name": "edgesJson",
+      "kind": "Measure",
+      "description": "DAX measure returning the Edges JSON array string"
+    }
+  ],
+  "dataViewMappings": [
+    {
+      "table": {
+        "rows": {
+          "select": [
+            { "for": { "in": "nodesJson" } },
+            { "for": { "in": "edgesJson" } }
+          ]
+        }
+      }
+    }
+  ],
+  "objects": {},
+  "supportsHighlight": false,
+  "supportsKeyboardFocus": true,
+  "privileges": []
+}
